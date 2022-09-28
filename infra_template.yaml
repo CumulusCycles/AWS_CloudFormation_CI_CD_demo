@@ -1,0 +1,321 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Resources:
+  # The VPC
+  ccVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: ccVPC
+
+  # IGW
+  ccIGW:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+          - Key: Name
+            Value: ccIGW
+
+  # Attach IGW to VPC
+  ccIGWAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref ccIGW
+      VpcId: !Ref ccVPC
+
+
+  # Public Subnets
+  ccPublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock:  10.0.0.0/24
+      MapPublicIpOnLaunch: true
+      VpcId:  !Ref ccVPC
+      Tags:
+        - Key: Name
+          Value: ccPublicSubnet1
+
+  ccPublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: true
+      VpcId: !Ref ccVPC
+      Tags:
+        - Key: Name
+          Value: ccPublicSubnet2
+
+
+  # Public RT
+  ccPublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties: 
+      VpcId: !Ref ccVPC
+      Tags:
+        - Key: Name
+          Value: ccPublicRouteTable
+
+  # Public Route
+  ccPublicRoute: 
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref ccIGW
+      RouteTableId: !Ref ccPublicRouteTable
+
+  # Public RT Associations
+  ccPublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref ccPublicRouteTable
+      SubnetId: !Ref ccPublicSubnet1
+
+  ccPublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref ccPublicRouteTable
+      SubnetId: !Ref ccPublicSubnet2
+
+
+  # Private App Subnets
+  ccPrivateAppSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock:  10.0.2.0/24
+      MapPublicIpOnLaunch: false
+      VpcId:  !Ref ccVPC
+      Tags:
+        - Key: Name
+          Value: ccPrivateAppSubnet1
+
+  ccPrivateAppSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: 10.0.3.0/24
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref ccVPC
+      Tags:
+        - Key: Name
+          Value: ccPrivateAppSubnet2
+  
+
+  # SG for App (Port 80)
+  ccAppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable Ports 80, 443
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      VpcId: !Ref ccVPC
+      Tags:
+        - Key: Name
+          Value: ccAppSecurityGroup
+      
+  # SG for SSH (Port 22)      
+  ccSSHSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable Port 22
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      VpcId: !Ref ccVPC
+      Tags:
+        - Key: Name
+          Value: ccSSHSecurityGroup
+
+  # SG for WebServer (Ports 80, 443)
+  ccWebServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable Ports 80, 443
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref ccAppSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref ccAppSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          SourceSecurityGroupId: !Ref ccSSHSecurityGroup
+      VpcId: !Ref ccVPC
+      Tags:
+        - Key: Name
+          Value: ccWebServerSecurityGroup
+
+
+# NAT Gateway
+  ccNatGateway1EIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: VPC
+      Tags:
+        - Key: Name
+          Value: ccNatGateway1EIP
+    DependsOn: ccVPC
+
+  ccNatGateway2EIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: VPC
+      Tags:
+        - Key: Name
+          Value: ccNatGateway2EIP
+    DependsOn: ccVPC
+
+  ccNatGateway1:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt ccNatGateway1EIP.AllocationId
+      SubnetId: !Ref ccPublicSubnet1
+      Tags:
+        - Key: Name
+          Value: ccNatGateway1
+    DependsOn: ccNatGateway1EIP
+
+  ccNatGateway2:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt ccNatGateway2EIP.AllocationId
+      SubnetId: !Ref ccPublicSubnet2
+      Tags:
+        - Key: Name
+          Value: ccNatGateway2
+    DependsOn: ccNatGateway2EIP
+
+  ccPrivateRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref ccVPC
+      Tags:
+        - Key: Name
+          Value: ccPrivateRouteTable1
+
+  ccPrivateRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref ccNatGateway1
+      RouteTableId: !Ref ccPrivateRouteTable1
+    DependsOn: 
+      - ccNatGateway1
+      - ccPrivateRouteTable1
+
+  ccPrivateAppSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref ccPrivateRouteTable1
+      SubnetId:  !Ref ccPrivateAppSubnet1
+    DependsOn: 
+      - ccNatGateway1
+      - ccPrivateRouteTable1
+
+  ccPrivateRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:  !Ref ccVPC
+      Tags:
+        - Key: Name
+          Value: ccPrivateRouteTable2
+    DependsOn: ccVPC
+
+  ccPrivateRoute2:
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref ccNatGateway2
+      RouteTableId: !Ref ccPrivateRouteTable2
+    DependsOn: 
+      - ccNatGateway2
+      - ccPrivateRouteTable2
+
+  ccPrivateAppSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref ccPrivateRouteTable2
+      SubnetId:  !Ref ccPrivateAppSubnet2
+    DependsOn: 
+      - ccNatGateway2
+      - ccPrivateRouteTable2
+
+# Web Servers
+  ccWebServer1:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t2.micro
+      ImageId: ami-026b57f3c383c2eec
+      SubnetId: !Ref ccPrivateAppSubnet1
+      SecurityGroupIds: 
+        - !Ref ccWebServerSecurityGroup
+      KeyName: YOUR_KP
+      Tags:
+        - Key: Name
+          Value: ccWebServer1
+      UserData:
+        Fn::Base64:
+          !Sub |
+            #!/bin/bash -xe
+            sudo su 
+            yum update -y 
+            yum install -y httpd 
+            echo "<h1>Hello, World!</h1>server: ccWebServer1" > /var/www/html/index.html 
+            echo "healthy" > /var/www/html/hc.html 
+            service httpd start
+    DependsOn: ccVPC
+
+  ccWebServer2:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t2.micro
+      ImageId: ami-026b57f3c383c2eec
+      SubnetId: !Ref ccPrivateAppSubnet2
+      SecurityGroupIds: 
+        - !Ref ccWebServerSecurityGroup
+      KeyName: YOUR_KP
+      Tags:
+        - Key: Name
+          Value: ccWebServer2
+      UserData:
+        Fn::Base64:
+          !Sub |
+            #!/bin/bash -xe
+            sudo su 
+            yum update -y 
+            yum install -y httpd 
+            echo "<h1>Hello, World!</h1>server: ccWebServer2" > /var/www/html/index.html 
+            echo "healthy" > /var/www/html/hc.html 
+            service httpd start
+    DependsOn: ccVPC
+
+Outputs:
+  ccWebServer1:
+    Export:
+      Name: !Sub ${AWS::StackName}-ccWebServer1
+    Value: !Ref ccWebServer1
+
+  ccWebServer2:
+    Export:
+      Name: !Sub ${AWS::StackName}-ccWebServer2
+    Value: !Ref ccWebServer2
